@@ -2,7 +2,7 @@ const path = require("node:path");
 const mysql = require("mysql2/promise");
 
 require("dotenv").config({
-  path: path.resolve(__dirname, "../../../.env"),
+  path: path.resolve(__dirname, "../../.env"),
 });
 
 const requiredSettings = ["DB_HOST", "DB_USER", "DB_NAME"];

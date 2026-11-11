@@ -1,0 +1,111 @@
+{
+  "info": {
+    "_postman_id": "7a5d8b6e-5d9f-4d5e-9c83-7106d57a2c91",
+    "name": "RentSpace API Smoke Checks",
+    "description": "Import into LiteClient. Set the three password variables locally before sending login requests. Run requests in order; room block is removed near the end.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3000/api" },
+    { "key": "adminLogin", "value": "admin01" },
+    { "key": "adminPassword", "value": "" },
+    { "key": "adminToken", "value": "" },
+    { "key": "ownerLogin", "value": "owner01" },
+    { "key": "ownerPassword", "value": "" },
+    { "key": "ownerToken", "value": "" },
+    { "key": "customerLogin", "value": "renter01" },
+    { "key": "customerPassword", "value": "" },
+    { "key": "customerToken", "value": "" },
+    { "key": "spaceId", "value": "2001" },
+    { "key": "blockStart", "value": "2099-01-01" },
+    { "key": "blockEnd", "value": "2099-01-03" },
+    { "key": "blockId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. Admin login",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"login\": \"{{adminLogin}}\",\n  \"password\": \"{{adminPassword}}\"\n}", "options": { "raw": { "language": "json" } } },
+        "url": "{{baseUrl}}/auth/login"
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body = pm.response.json();", "if (pm.response.code === 200 && body.token) pm.collectionVariables.set('adminToken', body.token);", "pm.test('Admin login returns a bearer token', () => pm.expect(pm.response.code).to.eql(200));"] } }]
+    },
+    {
+      "name": "2. Admin profile",
+      "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }], "url": "{{baseUrl}}/auth/me" }
+    },
+    {
+      "name": "3. Admin can read audit logs",
+      "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{adminToken}}" }], "url": "{{baseUrl}}/admin/logs" }
+    },
+    {
+      "name": "4. Owner login",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"login\": \"{{ownerLogin}}\",\n  \"password\": \"{{ownerPassword}}\"\n}", "options": { "raw": { "language": "json" } } },
+        "url": "{{baseUrl}}/auth/login"
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body = pm.response.json();", "if (pm.response.code === 200 && body.token) pm.collectionVariables.set('ownerToken', body.token);", "pm.test('Owner login returns a bearer token', () => pm.expect(pm.response.code).to.eql(200));"] } }]
+    },
+    {
+      "name": "5. Owner creates temporary room block",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{ownerToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"start_date\": \"{{blockStart}}\",\n  \"end_date\": \"{{blockEnd}}\",\n  \"reason\": \"LiteClient smoke check\"\n}", "options": { "raw": { "language": "json" } } },
+        "url": "{{baseUrl}}/spaces/{{spaceId}}/blocks"
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body = pm.response.json();", "if (pm.response.code === 201 && body.block) pm.collectionVariables.set('blockId', body.block.block_id);", "pm.test('Temporary block created', () => pm.expect(pm.response.code).to.eql(201));"] } }]
+    },
+    {
+      "name": "6. Calendar includes the block",
+      "request": { "method": "GET", "url": "{{baseUrl}}/spaces/{{spaceId}}/availability?start_date={{blockStart}}&end_date={{blockEnd}}" },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body = pm.response.json();", "pm.test('Availability lists the temporary block', () => { pm.expect(pm.response.code).to.eql(200); pm.expect(body.blocks.some((item) => String(item.block_id) === String(pm.collectionVariables.get('blockId')))).to.eql(true); });"] } }]
+    },
+    {
+      "name": "7. Customer login",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"login\": \"{{customerLogin}}\",\n  \"password\": \"{{customerPassword}}\"\n}", "options": { "raw": { "language": "json" } } },
+        "url": "{{baseUrl}}/auth/login"
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["const body = pm.response.json();", "if (pm.response.code === 200 && body.token) pm.collectionVariables.set('customerToken', body.token);", "pm.test('Customer login returns a bearer token', () => pm.expect(pm.response.code).to.eql(200));"] } }]
+    },
+    {
+      "name": "8. Customer is denied admin logs (expect 403)",
+      "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }], "url": "{{baseUrl}}/admin/logs" },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Customer is denied admin endpoint', () => pm.expect(pm.response.code).to.eql(403));"] } }]
+    },
+    {
+      "name": "9. Customer booking history",
+      "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }], "url": "{{baseUrl}}/bookings/history" }
+    },
+    {
+      "name": "10. Booking during blocked dates is rejected (expect 409)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }, { "key": "Content-Type", "value": "application/json" }],
+        "body": { "mode": "raw", "raw": "{\n  \"space_id\": {{spaceId}},\n  \"start_date\": \"{{blockStart}}\",\n  \"end_date\": \"{{blockEnd}}\"\n}", "options": { "raw": { "language": "json" } } },
+        "url": "{{baseUrl}}/bookings"
+      },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Booking overlapping a room block is rejected', () => pm.expect(pm.response.code).to.eql(409));"] } }]
+    },
+    {
+      "name": "11. Remove temporary room block",
+      "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{ownerToken}}" }], "url": "{{baseUrl}}/spaces/{{spaceId}}/blocks/{{blockId}}" }
+    },
+    {
+      "name": "12. Logout customer",
+      "request": { "method": "POST", "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }], "url": "{{baseUrl}}/auth/logout" }
+    },
+    {
+      "name": "13. Revoked token is rejected (expect 401)",
+      "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }], "url": "{{baseUrl}}/auth/me" },
+      "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Logged out token is rejected', () => pm.expect(pm.response.code).to.eql(401));"] } }]
+    }
+  ]
+}
