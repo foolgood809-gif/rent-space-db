@@ -89,7 +89,7 @@
       "request": {
         "method": "POST",
         "header": [{ "key": "Authorization", "value": "Bearer {{customerToken}}" }, { "key": "Content-Type", "value": "application/json" }],
-        "body": { "mode": "raw", "raw": "{\n  \"space_id\": {{spaceId}},\n  \"start_date\": \"{{blockStart}}\",\n  \"end_date\": \"{{blockEnd}}\"\n}", "options": { "raw": { "language": "json" } } },
+        "body": { "mode": "raw", "raw": "{\n  \"space_id\": {{spaceId}},\n  \"start_date\": \"{{blockStart}}\",\n  \"start_time\": \"10:00\",\n  \"end_date\": \"{{blockEnd}}\",\n  \"end_time\": \"12:00\"\n}", "options": { "raw": { "language": "json" } } },
         "url": "{{baseUrl}}/bookings"
       },
       "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Booking overlapping a room block is rejected', () => pm.expect(pm.response.code).to.eql(409));"] } }]

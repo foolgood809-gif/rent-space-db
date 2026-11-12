@@ -35,11 +35,11 @@ Dates are real calendar dates and `end_date` must be later than `start_date`. Ra
 |---|---|---|
 | `GET /bookings` | Bearer token | Customer sees own bookings; owner sees bookings for their spaces; admin sees all. |
 | `GET /bookings/history` | Bearer token | Same role-based scope, with payment summary. |
-| `POST /bookings` | Customer bearer token; `{ space_id, start_date, end_date }` | `201`: starts `pending`; customer ID comes from the session. |
+| `POST /bookings` | Customer bearer token; `{ space_id, start_date, start_time, end_date, end_time }`; dates use `YYYY-MM-DD`, times use `HH:mm` (24-hour) | `201`: starts `pending`; customer ID comes from the session. `start_time` and `end_time` are stored as full datetimes. |
 | `PATCH /bookings/:bookingId/status` | Admin bearer token; `{ status: "approved" | "rejected" | "cancelled" }` | `200`: updated booking. |
 | `DELETE /bookings/:bookingId` | Customer/owner of record or admin bearer token | `200`; approved bookings must first be cancelled. |
 
-Only approved spaces can be booked. Pending, approved or confirmed bookings and room blocks prevent overlapping requests. Conflicts return `409`.
+Only approved spaces can be booked. Pending, approved or confirmed bookings prevent overlapping time ranges; older bookings without time values block their full date range. Room blocks prevent booking on blocked dates. Conflicts return `409`.
 
 Status transitions: `pending` → `approved`, `rejected` or `cancelled`; `approved` → `cancelled`; rejected/cancelled are final.
 

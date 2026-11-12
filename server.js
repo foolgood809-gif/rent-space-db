@@ -17,6 +17,8 @@ const validDate = (value) => {
   const date = new Date(`${value}T00:00:00Z`);
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 };
+const validTime = (value) => typeof value === "string" && /^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(value);
+const dateTimeValue = (date, time) => `${date} ${time.length === 5 ? `${time}:00` : time}`;
 
 app.use("/api", require("./src/routes/auth")(db));
 
@@ -213,7 +215,7 @@ app.get("/api/spaces/:spaceId/availability", async (req, res) => {
 
 app.post("/api/spaces/:spaceId/blocks", requireAuth, requireRole("owner", "admin"), async (req, res) => {
   const spaceId = Number(req.params.spaceId);
-  const { start_date: startDate, end_date: endDate, reason = null } = req.body;
+  const { start_date: startDate, end_date: endDate, reason = null } = req.body ?? {};
   if (!Number.isSafeInteger(spaceId) || spaceId < 1 || !validDate(startDate) || !validDate(endDate) || endDate <= startDate ||
       (reason !== null && (typeof reason !== "string" || reason.length > 255))) {
     return res.status(400).json({ error: "กรุณาระบุช่วงวันที่และ reason (ไม่เกิน 255 ตัวอักษร) ให้ถูกต้อง" });
@@ -278,6 +280,7 @@ app.get("/api/bookings/history", requireAuth, async (req, res) => {
     else if (req.user.role === "owner") { scope = "WHERE s.owner_id = ?"; params.push(req.user.user_id); }
     const [rows] = await db.execute(
       `SELECT b.booking_id, b.space_id, s.title, b.customer_id, u.username, b.start_date, b.end_date,
+              b.start_time, b.end_time,
               b.status, b.created_at, p.payment_id, p.amount, p.payment_method, p.status AS payment_status, p.paid_at
        FROM bookings b JOIN users u ON u.user_id = b.customer_id JOIN spaces s ON s.space_id = b.space_id
        LEFT JOIN payments p ON p.booking_id = b.booking_id ${scope} ORDER BY b.start_date DESC, b.booking_id DESC`, params
@@ -297,7 +300,7 @@ app.get("/api/bookings", requireAuth, async (req, res) => {
     else if (req.user.role === "owner") { where = "WHERE s.owner_id = ?"; params.push(req.user.user_id); }
     const [bookings] = await db.execute(
       `SELECT b.booking_id, b.space_id, s.title, b.customer_id, u.username,
-              b.start_date, b.end_date, b.status, b.created_at
+              b.start_date, b.end_date, b.start_time, b.end_time, b.status, b.created_at
        FROM bookings AS b
        JOIN users AS u ON u.user_id = b.customer_id
        JOIN spaces AS s ON s.space_id = b.space_id
@@ -311,17 +314,20 @@ app.get("/api/bookings", requireAuth, async (req, res) => {
 });
 
 app.post("/api/bookings", requireAuth, requireRole("customer"), async (req, res) => {
-  const { space_id, start_date, end_date } = req.body;
+  const { space_id, start_date, start_time, end_date, end_time } = req.body;
   const spaceId = Number(space_id);
   const customerId = req.user.user_id;
+  const startsAt = validDate(start_date) && validTime(start_time) ? dateTimeValue(start_date, start_time) : null;
+  const endsAt = validDate(end_date) && validTime(end_time) ? dateTimeValue(end_date, end_time) : null;
 
   if (
     !Number.isSafeInteger(spaceId) || spaceId < 1 ||
     !validDate(start_date) || !validDate(end_date) ||
-    end_date <= start_date
+    !validTime(start_time) || !validTime(end_time) ||
+    endsAt <= startsAt
   ) {
     return res.status(400).json({
-      error: "กรุณาส่ง space_id และวันที่รูปแบบ YYYY-MM-DD ให้ถูกต้อง โดย end_date ต้องอยู่หลัง start_date",
+      error: "กรุณาส่ง space_id, วันที่ YYYY-MM-DD และเวลา HH:mm ให้ถูกต้อง โดยเวลาสิ้นสุดต้องอยู่หลังเวลาเริ่ม",
     });
   }
 
@@ -346,9 +352,12 @@ app.post("/api/bookings", requireAuth, requireRole("customer"), async (req, res)
       const [overlaps] = await connection.execute(
         `SELECT booking_id FROM bookings
          WHERE space_id = ? AND status IN ('pending', 'approved', 'confirmed')
-           AND start_date < ? AND end_date > ?
+           AND (
+             (start_time IS NOT NULL AND end_time IS NOT NULL AND start_time < ? AND end_time > ?)
+             OR ((start_time IS NULL OR end_time IS NULL) AND start_date < ? AND end_date >= ?)
+           )
          LIMIT 1`,
-        [spaceId, end_date, start_date]
+        [spaceId, endsAt, startsAt, end_date, start_date]
       );
       if (overlaps.length > 0) {
         await connection.rollback();
@@ -363,9 +372,9 @@ app.post("/api/bookings", requireAuth, requireRole("customer"), async (req, res)
         return res.status(409).json({ error: "ห้องถูกปิดในช่วงวันที่เลือก" });
       }
       const [insertResult] = await connection.execute(
-        `INSERT INTO bookings (space_id, customer_id, start_date, end_date, status)
-         VALUES (?, ?, ?, ?, 'pending')`,
-        [spaceId, customerId, start_date, end_date]
+        `INSERT INTO bookings (space_id, customer_id, start_date, end_date, start_time, end_time, status)
+         VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
+        [spaceId, customerId, start_date, end_date, startsAt, endsAt]
       );
       result = insertResult;
       await connection.commit();
@@ -378,7 +387,7 @@ app.post("/api/bookings", requireAuth, requireRole("customer"), async (req, res)
 
     const [rows] = await db.execute(
       `SELECT b.booking_id, b.space_id, s.title, b.customer_id, u.username,
-              b.start_date, b.end_date, b.status, b.created_at
+              b.start_date, b.end_date, b.start_time, b.end_time, b.status, b.created_at
        FROM bookings AS b
        JOIN users AS u ON u.user_id = b.customer_id
        JOIN spaces AS s ON s.space_id = b.space_id
@@ -438,7 +447,7 @@ app.patch("/api/bookings/:bookingId/status", requireAdmin, async (req, res) => {
 
     const [rows] = await db.execute(
       `SELECT b.booking_id, b.space_id, s.title, b.customer_id, u.username,
-              b.start_date, b.end_date, b.status, b.created_at
+              b.start_date, b.end_date, b.start_time, b.end_time, b.status, b.created_at
        FROM bookings AS b
        JOIN users AS u ON u.user_id = b.customer_id
        JOIN spaces AS s ON s.space_id = b.space_id
