@@ -1,6 +1,7 @@
 const express = require("express");
 const db = require("./src/config/db");
 const { requireAuth, requireRole } = require("./src/middleware/auth");
+const bookingModel = require("./src/models/bookingModel");
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -12,13 +13,7 @@ const requireAdmin = [requireAuth, requireRole("admin"), (req, _res, next) => {
   req.admin = { id: req.user.user_id, name: req.user.name };
   next();
 }];
-const validDate = (value) => {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const date = new Date(`${value}T00:00:00Z`);
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
-};
-const validTime = (value) => typeof value === "string" && /^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d)?$/.test(value);
-const dateTimeValue = (date, time) => `${date} ${time.length === 5 ? `${time}:00` : time}`;
+const validDate = bookingModel.isValidDate;
 
 app.use("/api", require("./src/routes/auth")(db));
 
@@ -314,22 +309,10 @@ app.get("/api/bookings", requireAuth, async (req, res) => {
 });
 
 app.post("/api/bookings", requireAuth, requireRole("customer"), async (req, res) => {
-  const { space_id, start_date, start_time, end_date, end_time } = req.body;
-  const spaceId = Number(space_id);
+  const parsed = bookingModel.parseCreateBookingInput(req.body);
+  if (parsed.error) return res.status(400).json({ error: parsed.error });
+  const { spaceId, startDate, endDate, startsAt, endsAt } = parsed.value;
   const customerId = req.user.user_id;
-  const startsAt = validDate(start_date) && validTime(start_time) ? dateTimeValue(start_date, start_time) : null;
-  const endsAt = validDate(end_date) && validTime(end_time) ? dateTimeValue(end_date, end_time) : null;
-
-  if (
-    !Number.isSafeInteger(spaceId) || spaceId < 1 ||
-    !validDate(start_date) || !validDate(end_date) ||
-    !validTime(start_time) || !validTime(end_time) ||
-    endsAt <= startsAt
-  ) {
-    return res.status(400).json({
-      error: "กรุณาส่ง space_id, วันที่ YYYY-MM-DD และเวลา HH:mm ให้ถูกต้อง โดยเวลาสิ้นสุดต้องอยู่หลังเวลาเริ่ม",
-    });
-  }
 
   try {
     // Lock the space row so concurrent requests cannot both pass the overlap check.
@@ -349,33 +332,18 @@ app.post("/api/bookings", requireAuth, requireRole("customer"), async (req, res)
         await connection.rollback();
         return res.status(409).json({ error: "จองได้เฉพาะพื้นที่ที่อนุมัติแล้ว" });
       }
-      const [overlaps] = await connection.execute(
-        `SELECT booking_id FROM bookings
-         WHERE space_id = ? AND status IN ('pending', 'approved', 'confirmed')
-           AND (
-             (start_time IS NOT NULL AND end_time IS NOT NULL AND start_time < ? AND end_time > ?)
-             OR ((start_time IS NULL OR end_time IS NULL) AND start_date < ? AND end_date >= ?)
-           )
-         LIMIT 1`,
-        [spaceId, endsAt, startsAt, end_date, start_date]
-      );
-      if (overlaps.length > 0) {
+      const bookingInput = { spaceId, startDate, endDate, startsAt, endsAt };
+      if (await bookingModel.hasActiveBookingConflict(connection, bookingInput)) {
         await connection.rollback();
         return res.status(409).json({ error: "ช่วงวันที่เลือกมีรายการจองที่ยังใช้งานอยู่แล้ว" });
       }
-      const [blocks] = await connection.execute(
-        "SELECT block_id FROM room_blocks WHERE space_id = ? AND start_date < ? AND end_date > ? LIMIT 1",
-        [spaceId, end_date, start_date]
-      );
-      if (blocks.length) {
+      if (await bookingModel.hasRoomBlockConflict(connection, bookingInput)) {
         await connection.rollback();
         return res.status(409).json({ error: "ห้องถูกปิดในช่วงวันที่เลือก" });
       }
-      const [insertResult] = await connection.execute(
-        `INSERT INTO bookings (space_id, customer_id, start_date, end_date, start_time, end_time, status)
-         VALUES (?, ?, ?, ?, ?, ?, 'pending')`,
-        [spaceId, customerId, start_date, end_date, startsAt, endsAt]
-      );
+      const insertResult = await bookingModel.insertBooking(connection, {
+        ...bookingInput, customerId,
+      });
       result = insertResult;
       await connection.commit();
     } catch (error) {
