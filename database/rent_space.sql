@@ -98,6 +98,7 @@ CREATE TABLE `bookings` (
   `start_time` datetime DEFAULT NULL,
   `end_time` datetime DEFAULT NULL,
   `total_price` decimal(10,2) DEFAULT NULL,
+  `platform_fee` decimal(10,2) DEFAULT NULL COMMENT 'Fee amount captured when the booking is created',
   `status` enum('pending','approved','rejected','cancelled','confirmed','completed') NOT NULL DEFAULT 'pending',
   `is_paid` tinyint(1) NOT NULL DEFAULT 0,
   `payment_ref` varchar(100) DEFAULT NULL,
@@ -105,6 +106,16 @@ CREATE TABLE `bookings` (
   `rating` int(11) DEFAULT NULL,
   `review_comment` text DEFAULT NULL,
   `created_at` timestamp NOT NULL DEFAULT current_timestamp()
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
+
+-- Optional booking metadata used by clients for fee snapshots and cancellation reasons.
+CREATE TABLE `booking_meta` (
+  `booking_id` int(11) NOT NULL,
+  `platform_fee` decimal(10,2) DEFAULT NULL COMMENT 'Fee amount captured when the booking is created',
+  `reason_kind` enum('canceledByUser','expiredBySystem') DEFAULT NULL,
+  `reason` text DEFAULT NULL,
+  PRIMARY KEY (`booking_id`),
+  CONSTRAINT `fk_booking_meta_booking` FOREIGN KEY (`booking_id`) REFERENCES `bookings` (`booking_id`) ON DELETE CASCADE ON UPDATE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
 
 --

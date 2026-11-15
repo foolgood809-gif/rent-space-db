@@ -7,6 +7,7 @@ erDiagram
     USERS ||--o{ SPACES : owns
     USERS ||--o{ BOOKINGS : requests
     SPACES ||--o{ BOOKINGS : receives
+    BOOKINGS ||--o| BOOKING_META : describes
     SPACES ||--o{ ROOM_BLOCKS : blocks
     USERS ||--o{ ROOM_BLOCKS : creates
     USERS ||--o{ AUTH_SESSIONS : signs_in
@@ -36,8 +37,15 @@ erDiagram
         int customer_id FK
         date start_date
         date end_date
+        decimal platform_fee
         enum status
         timestamp created_at
+    }
+    BOOKING_META {
+        int booking_id PK, FK
+        decimal platform_fee
+        enum reason_kind
+        text reason
     }
     ROOM_BLOCKS {
         int block_id PK
